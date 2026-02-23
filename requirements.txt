@@ -1,0 +1,9 @@
+flask==3.0.0
+requests==2.31.0
+beautifulsoup4==4.12.2
+lxml==4.9.3
+urllib3==2.1.0
+colorama==0.4.6
+validators==0.22.0
+python-whois==0.8.0
+dnspython==2.4.2

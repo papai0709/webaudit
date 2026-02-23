@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web Analyser - Website Security & Performance Tool</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🔍 Web Analyser</h1>
+            <p class="subtitle">Comprehensive Website Security, Performance & SEO Analysis</p>
+        </header>
+
+        <div class="input-section">
+            <div class="input-group">
+                <input 
+                    type="text" 
+                    id="urlInput" 
+                    placeholder="Enter website URL (e.g., example.com or https://example.com)"
+                    aria-label="Website URL"
+                >
+                <button id="analyzeBtn" onclick="analyzeWebsite()">
+                    <span class="btn-text">Analyze Website</span>
+                    <span class="btn-loader" style="display: none;">⏳</span>
+                </button>
+            </div>
+            <p class="input-hint">Enter any website URL to check for security issues, broken links, performance problems, and improvement opportunities.</p>
+        </div>
+
+        <div id="loadingSection" class="loading-section" style="display: none;">
+            <div class="spinner"></div>
+            <p>Analyzing website... This may take a few moments.</p>
+        </div>
+
+        <div id="errorSection" class="error-section" style="display: none;">
+            <div class="error-content">
+                <span class="error-icon">⚠️</span>
+                <p id="errorMessage"></p>
+            </div>
+        </div>
+
+        <div id="resultsSection" class="results-section" style="display: none;">
+            <div class="results-header">
+                <div class="results-header-top">
+                    <div>
+                        <h2>Analysis Results</h2>
+                        <p id="analyzedUrl"></p>
+                        <p id="timestamp"></p>
+                    </div>
+                    <button id="exportPdfBtn" class="export-btn" onclick="exportToPdf()">
+                        📄 Export as PDF
+                    </button>
+                </div>
+            </div>
+
+            <!-- Overall Summary Card -->
+            <div class="result-card summary-card">
+                <div class="card-header summary-header">
+                    <h3>📊 Overall Summary</h3>
+                </div>
+                <div class="card-body">
+                    <div id="overallScores" class="scores-grid"></div>
+                </div>
+            </div>
+
+            <!-- Security Section -->
+            <div class="result-card">
+                <div class="card-header security-header">
+                    <h3>🔒 Security Analysis</h3>
+                    <span id="securityScore" class="score-badge"></span>
+                </div>
+                <div class="card-body">
+                    <div id="securityPassed" class="passed-list"></div>
+                    <div id="securityIssues" class="issues-list"></div>
+                </div>
+            </div>
+
+            <!-- Broken Links Section -->
+            <div class="result-card">
+                <div class="card-header links-header">
+                    <h3>🔗 Broken Links</h3>
+                    <span id="brokenLinksCount" class="count-badge"></span>
+                </div>
+                <div class="card-body">
+                    <div id="linksStats" class="stats-row"></div>
+                    <div id="brokenLinksList" class="issues-list"></div>
+                </div>
+            </div>
+
+            <!-- Performance Section -->
+            <div class="result-card">
+                <div class="card-header performance-header">
+                    <h3>⚡ Performance Analysis</h3>
+                </div>
+                <div class="card-body">
+                    <div id="performanceMetrics" class="metrics-grid"></div>
+                    <div id="performanceGood" class="passed-list"></div>
+                    <div id="performanceIssues" class="issues-list"></div>
+                </div>
+            </div>
+
+            <!-- Rendering Section -->
+            <div class="result-card">
+                <div class="card-header rendering-header">
+                    <h3>🎨 Rendering Analysis</h3>
+                    <span id="renderingScore" class="score-badge"></span>
+                </div>
+                <div class="card-body">
+                    <div id="renderingGood" class="passed-list"></div>
+                    <div id="renderingIssues" class="issues-list"></div>
+                </div>
+            </div>
+
+            <!-- Improvements Section -->
+            <div class="result-card">
+                <div class="card-header improvements-header">
+                    <h3>💡 Suggested Improvements</h3>
+                    <span id="improvementsCount" class="count-badge"></span>
+                </div>
+                <div class="card-body">
+                    <div id="improvementsList" class="improvements-list"></div>
+                </div>
+            </div>
+
+            <!-- SEO Section -->
+            <div class="result-card">
+                <div class="card-header seo-header">
+                    <h3>🎯 SEO Analysis</h3>
+                    <span id="seoScore" class="score-badge"></span>
+                </div>
+                <div class="card-body">
+                    <div id="seoGood" class="passed-list"></div>
+                    <div id="seoIssues" class="issues-list"></div>
+                </div>
+            </div>
+
+            <!-- Accessibility Section -->
+            <div class="result-card">
+                <div class="card-header accessibility-header">
+                    <h3>♿ Accessibility</h3>
+                    <span id="accessibilityScore" class="score-badge"></span>
+                </div>
+                <div class="card-body">
+                    <div id="accessibilityGood" class="passed-list"></div>
+                    <div id="accessibilityIssues" class="issues-list"></div>
+                </div>
+            </div>
+
+            <!-- Mobile Optimization Section -->
+            <div class="result-card">
+                <div class="card-header mobile-header">
+                    <h3>📱 Mobile Optimization</h3>
+                    <span id="mobileScore" class="score-badge"></span>
+                </div>
+                <div class="card-body">
+                    <div id="mobileGood" class="passed-list"></div>
+                    <div id="mobileIssues" class="issues-list"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer>
+        <p>Web Analyser © 2026 | Analyze websites for security, performance, and SEO</p>
+    </footer>
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
