@@ -6,6 +6,7 @@ import ssl
 import socket
 from datetime import datetime
 import re
+from collections import deque
 
 class WebsiteAnalyzer:
     def __init__(self, url, max_pages=50):
@@ -14,23 +15,572 @@ class WebsiteAnalyzer:
         self.visited_urls = set()
         self.broken_links = []
         self.all_links = []
+        parsed = urlparse(url)
+        self.base_domain = parsed.netloc
+        self.base_scheme = parsed.scheme
         
+    def crawl_site(self):
+        """BFS crawl to discover all internal sub-pages up to max_pages.
+        Returns a list of (url, soup) tuples for pages successfully fetched."""
+        browser_headers = {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+        }
+
+        queue = deque([self.url])
+        visited = set([self.url])
+        pages = []  # list of (url, soup, response)
+
+        while queue and len(pages) < self.max_pages:
+            current_url = queue.popleft()
+            try:
+                resp = requests.get(current_url, timeout=10, headers=browser_headers, allow_redirects=True)
+                # Only process HTML pages
+                content_type = resp.headers.get('content-type', '')
+                if 'text/html' not in content_type:
+                    continue
+                soup = BeautifulSoup(resp.content, 'html.parser')
+                pages.append((current_url, soup, resp))
+                self.visited_urls.add(current_url)
+
+                # Discover internal links from this page
+                for tag in soup.find_all('a', href=True):
+                    href = tag['href']
+                    # Skip fragments, mailto, tel, javascript
+                    if href.startswith(('#', 'mailto:', 'tel:', 'javascript:', 'data:')):
+                        continue
+                    full_url = urljoin(current_url, href)
+                    # Normalise: strip fragment
+                    full_url = full_url.split('#')[0].rstrip('/')
+                    if not full_url:
+                        continue
+                    parsed = urlparse(full_url)
+                    # Only follow same-domain http/https links
+                    if parsed.netloc != self.base_domain:
+                        continue
+                    if parsed.scheme not in ('http', 'https'):
+                        continue
+                    if full_url not in visited:
+                        visited.add(full_url)
+                        queue.append(full_url)
+            except Exception:
+                continue
+
+        return pages
+
     def analyze(self):
-        """Run all analysis checks"""
+        """Crawl the site then run all analysis checks across every page."""
+        # ── 1. Crawl ──────────────────────────────────────────────────────────
+        pages = self.crawl_site()
+        pages_crawled = len(pages)
+
+        if pages_crawled == 0:
+            return {
+                'url': self.url,
+                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'pages_crawled': 0,
+                'crawled_urls': [],
+                'error': 'Could not fetch any pages from this URL.'
+            }
+
+        # ── 2. Per-page checks ─────────────────────────────────────────────────
+        # We aggregate issues/good lists and average scores
+        agg_security_issues, agg_security_passed = [], []
+        agg_broken, agg_working_count = [], 0
+        agg_perf_issues, agg_perf_good = [], []
+        agg_render_issues, agg_render_good = [], []
+        agg_seo_issues, agg_seo_good = [], []
+        agg_acc_issues, agg_acc_good = [], []
+        agg_mob_issues, agg_mob_good = [], []
+        agg_suggestions = []
+
+        security_scores, perf_scores, render_scores, seo_scores, acc_scores, mob_scores = [], [], [], [], [], []
+        load_times, page_sizes = [], []
+        per_page_summary = []
+
+        seen_broken_urls = set()
+
+        for page_url, soup, resp in pages:
+            # ── security (only run on entry URL to avoid N×SSL checks)
+            if page_url == self.url:
+                sec = self.check_security()
+                agg_security_issues.extend(sec['issues'])
+                agg_security_passed.extend(sec['passed'])
+                security_scores.append(sec['score'])
+
+            # ── broken links
+            bl = self._check_broken_links_for_page(page_url, soup)
+            for item in bl['broken']:
+                if item['url'] not in seen_broken_urls:
+                    seen_broken_urls.add(item['url'])
+                    agg_broken.append(item)
+            agg_working_count += bl['working_count']
+
+            # ── performance
+            perf = self._check_performance_for_page(page_url, soup, resp)
+            agg_perf_issues.extend(perf['issues'])
+            agg_perf_good.extend(perf['good'])
+            perf_scores.append(perf['score'])
+            if perf.get('load_time') not in ('N/A', None):
+                load_times.append(float(perf['load_time'].replace('s', '')))
+            if perf.get('page_size') not in ('N/A', None):
+                page_sizes.append(float(perf['page_size'].replace(' KB', '')))
+
+            # ── rendering
+            rend = self._check_rendering_for_page(page_url, soup)
+            agg_render_issues.extend(rend['issues'])
+            agg_render_good.extend(rend['good'])
+            render_scores.append(rend['score'])
+
+            # ── seo
+            seo = self._check_seo_for_page(page_url, soup)
+            agg_seo_issues.extend(seo['issues'])
+            agg_seo_good.extend(seo['good'])
+            seo_scores.append(seo['score'])
+
+            # ── accessibility
+            acc = self._check_accessibility_for_page(page_url, soup)
+            agg_acc_issues.extend(acc['issues'])
+            agg_acc_good.extend(acc['good'])
+            acc_scores.append(acc['score'])
+
+            # ── mobile
+            mob = self._check_mobile_for_page(page_url, soup)
+            agg_mob_issues.extend(mob['issues'])
+            agg_mob_good.extend(mob['good'])
+            mob_scores.append(mob['score'])
+
+            # ── improvements (entry page only to avoid noise)
+            if page_url == self.url:
+                impr = self._suggest_improvements_for_page(page_url, soup)
+                agg_suggestions.extend(impr['suggestions'])
+
+            # ── per-page row
+            per_page_summary.append({
+                'url': page_url,
+                'seo_score': seo['score'],
+                'perf_score': perf['score'],
+                'acc_score': acc['score'],
+                'mob_score': mob['score'],
+                'broken_count': len(bl['broken']),
+            })
+
+        def avg(lst): return round(sum(lst) / len(lst)) if lst else 0
+        def dedup_issues(issues):
+            seen, out = set(), []
+            for i in issues:
+                key = i.get('issue', '') + i.get('description', '')[:60]
+                if key not in seen:
+                    seen.add(key)
+                    out.append(i)
+            return out
+
         results = {
             'url': self.url,
             'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            'security': self.check_security(),
-            'broken_links': self.check_broken_links(),
-            'performance': self.check_performance(),
-            'rendering': self.check_rendering(),
-            'seo': self.check_seo(),
-            'accessibility': self.check_accessibility(),
-            'mobile': self.check_mobile_optimization(),
-            'improvements': self.suggest_improvements()
+            'pages_crawled': pages_crawled,
+            'crawled_urls': [p[0] for p in pages],
+            'per_page_summary': per_page_summary,
+            'security': {
+                'issues': dedup_issues(agg_security_issues),
+                'passed': list(dict.fromkeys(agg_security_passed)),
+                'score': avg(security_scores) if security_scores else max(0, 100 - len(agg_security_issues) * 15)
+            },
+            'broken_links': {
+                'broken': agg_broken,
+                'total_checked': len(agg_broken) + agg_working_count,
+                'broken_count': len(agg_broken),
+                'working_count': agg_working_count
+            },
+            'performance': {
+                'issues': dedup_issues(agg_perf_issues),
+                'good': list(dict.fromkeys(agg_perf_good)),
+                'score': avg(perf_scores),
+                'load_time': f'{sum(load_times)/len(load_times):.2f}s (avg)' if load_times else 'N/A',
+                'page_size': f'{sum(page_sizes)/len(page_sizes):.2f} KB (avg)' if page_sizes else 'N/A'
+            },
+            'rendering': {
+                'issues': dedup_issues(agg_render_issues),
+                'good': list(dict.fromkeys(agg_render_good)),
+                'score': avg(render_scores)
+            },
+            'seo': {
+                'issues': dedup_issues(agg_seo_issues),
+                'good': list(dict.fromkeys(agg_seo_good)),
+                'score': avg(seo_scores)
+            },
+            'accessibility': {
+                'issues': dedup_issues(agg_acc_issues),
+                'good': list(dict.fromkeys(agg_acc_good)),
+                'score': avg(acc_scores)
+            },
+            'mobile': {
+                'issues': dedup_issues(agg_mob_issues),
+                'good': list(dict.fromkeys(agg_mob_good)),
+                'score': avg(mob_scores)
+            },
+            'improvements': {
+                'suggestions': agg_suggestions,
+                'total_count': len(agg_suggestions)
+            }
         }
         return results
-    
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Private per-page helpers (accept pre-fetched soup so no extra HTTP calls)
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def _check_broken_links_for_page(self, page_url, soup):
+        """Check broken links found on a single already-fetched page."""
+        broken, working = [], []
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+        }
+        false_positive_codes = {403, 405, 406, 429, 503}
+
+        links = set()
+        for tag in soup.find_all(['a', 'link', 'script', 'img']):
+            url = tag.get('href') or tag.get('src')
+            if url:
+                if url.startswith(('javascript:', 'mailto:', 'tel:', '#', 'data:')):
+                    continue
+                full_url = urljoin(page_url, url)
+                if full_url.startswith(('http://', 'https://')):
+                    links.add(full_url)
+
+        links = list(links)[:50]  # cap per page
+
+        for link in links:
+            is_broken = False
+            status_code = None
+            reason = None
+            try:
+                r = requests.head(link, timeout=8, allow_redirects=True, headers=headers)
+                status_code = r.status_code
+                reason = r.reason
+                if status_code >= 400:
+                    if status_code in false_positive_codes:
+                        try:
+                            r_get = requests.get(link, timeout=8, allow_redirects=True, headers=headers, stream=True)
+                            status_code = r_get.status_code
+                            reason = r_get.reason
+                            r_get.close()
+                            is_broken = status_code >= 400 and status_code not in false_positive_codes
+                        except:
+                            is_broken = True
+                    else:
+                        is_broken = True
+            except requests.exceptions.SSLError as e:
+                is_broken = True; status_code = 'SSL Error'; reason = str(e)[:80]
+            except requests.exceptions.ConnectionError as e:
+                err = str(e).lower()
+                if 'name or service not known' in err or 'nodename nor servname' in err:
+                    is_broken = True; status_code = 'DNS Error'; reason = 'Domain not found'
+                elif 'connection refused' in err:
+                    is_broken = True; status_code = 'Refused'; reason = 'Connection refused'
+                else:
+                    is_broken = True; status_code = 'N/A'; reason = str(e)[:80]
+            except requests.exceptions.Timeout:
+                is_broken = True; status_code = 'Timeout'; reason = 'Request timed out'
+            except requests.exceptions.TooManyRedirects:
+                is_broken = True; status_code = 'Redirect Loop'; reason = 'Too many redirects'
+            except requests.exceptions.RequestException as e:
+                is_broken = True; status_code = 'Error'; reason = str(e)[:80]
+
+            if is_broken:
+                broken.append({'url': link, 'status_code': status_code, 'reason': reason, 'found_on': page_url})
+            else:
+                working.append(link)
+
+        return {
+            'broken': broken,
+            'total_checked': len(broken) + len(working),
+            'broken_count': len(broken),
+            'working_count': len(working)
+        }
+
+    def _check_performance_for_page(self, page_url, soup, resp):
+        """Check performance metrics using pre-fetched response."""
+        performance_issues = []
+        performance_good = []
+        load_time = None
+        page_size = None
+
+        try:
+            # Approximate load time from response elapsed
+            load_time = resp.elapsed.total_seconds() if hasattr(resp, 'elapsed') and resp.elapsed else 0.0
+            if load_time > 3:
+                performance_issues.append({'issue': 'Slow Page Load', 'value': f'{load_time:.2f}s', 'description': 'Page load time exceeds 3 seconds'})
+            else:
+                performance_good.append(f'Fast page load: {load_time:.2f}s')
+
+            page_size = len(resp.content) / 1024
+            if page_size > 2000:
+                performance_issues.append({'issue': 'Large Page Size', 'value': f'{page_size:.2f} KB', 'description': 'Page size exceeds 2MB'})
+            else:
+                performance_good.append(f'Reasonable page size: {page_size:.2f} KB')
+
+            resources = soup.find_all(['script', 'link', 'img', 'iframe'])
+            if len(resources) > 50:
+                performance_issues.append({'issue': 'Too Many Resources', 'value': f'{len(resources)} resources', 'description': 'Consider combining files'})
+            else:
+                performance_good.append(f'Reasonable resource count: {len(resources)}')
+
+            if 'content-encoding' not in resp.headers:
+                performance_issues.append({'issue': 'No Compression', 'value': 'N/A', 'description': 'Enable gzip or brotli compression'})
+            else:
+                performance_good.append(f"Compression enabled: {resp.headers.get('content-encoding')}")
+
+            cache_headers = ['cache-control', 'expires', 'etag']
+            if not any(h in resp.headers for h in cache_headers):
+                performance_issues.append({'issue': 'No Caching Headers', 'value': 'N/A', 'description': 'Add cache headers'})
+            else:
+                performance_good.append('Caching headers present')
+
+        except Exception as e:
+            performance_issues.append({'issue': 'Performance Check Failed', 'value': 'N/A', 'description': str(e)})
+
+        score = max(0, 100 - len(performance_issues) * 15)
+        return {
+            'issues': performance_issues,
+            'good': performance_good,
+            'score': score,
+            'load_time': f'{load_time:.2f}s' if load_time is not None else 'N/A',
+            'page_size': f'{page_size:.2f} KB' if page_size is not None else 'N/A'
+        }
+
+    def _check_rendering_for_page(self, page_url, soup):
+        """Check rendering quality using pre-fetched soup."""
+        rendering_issues = []
+        rendering_good = []
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        }
+        try:
+            css_links = soup.find_all('link', rel='stylesheet')
+            broken_css = []
+            for css in css_links[:10]:
+                href = css.get('href')
+                if href:
+                    css_url = urljoin(page_url, href)
+                    if css_url.startswith(('http://', 'https://')):
+                        try:
+                            r = requests.head(css_url, timeout=5, headers=headers, allow_redirects=True)
+                            if r.status_code >= 400 and r.status_code not in {403, 405}:
+                                broken_css.append(href)
+                        except:
+                            broken_css.append(href)
+            if broken_css:
+                rendering_issues.append({'severity': 'high', 'issue': 'CSS Files Not Loading', 'description': f'{len(broken_css)} stylesheet(s) failed to load'})
+            else:
+                rendering_good.append(f'All {len(css_links)} CSS stylesheets loading properly')
+
+            doctype = soup.contents[0] if soup.contents else None
+            if not str(doctype).lower().startswith('<!doctype'):
+                rendering_issues.append({'severity': 'high', 'issue': 'Missing DOCTYPE Declaration', 'description': 'Page may render in quirks mode'})
+            else:
+                rendering_good.append('Valid DOCTYPE declaration found')
+
+            meta_charset = soup.find('meta', charset=True) or soup.find('meta', attrs={'http-equiv': re.compile('content-type', re.I)})
+            if not meta_charset:
+                rendering_issues.append({'severity': 'medium', 'issue': 'Missing Character Encoding', 'description': 'No charset meta tag found'})
+            else:
+                rendering_good.append('Character encoding properly declared')
+
+            inline_styles = soup.find_all(style=True)
+            if len(inline_styles) > 50:
+                rendering_issues.append({'severity': 'low', 'issue': 'Excessive Inline Styles', 'description': f'Found {len(inline_styles)} elements with inline styles'})
+
+            print_css = soup.find('link', media=re.compile(r'print'))
+            if not print_css:
+                rendering_issues.append({'severity': 'low', 'issue': 'No Print Stylesheet', 'description': 'Consider adding print-specific styles'})
+            else:
+                rendering_good.append('Print stylesheet available')
+
+        except Exception as e:
+            rendering_issues.append({'severity': 'high', 'issue': 'Rendering Check Failed', 'description': str(e)})
+
+        high_issues = sum(1 for i in rendering_issues if i.get('severity') == 'high')
+        medium_issues = sum(1 for i in rendering_issues if i.get('severity') == 'medium')
+        low_issues = sum(1 for i in rendering_issues if i.get('severity') == 'low')
+        score = max(0, 100 - (high_issues * 20) - (medium_issues * 10) - (low_issues * 5))
+        return {'issues': rendering_issues, 'good': rendering_good, 'score': score}
+
+    def _check_seo_for_page(self, page_url, soup):
+        """Check SEO using pre-fetched soup."""
+        seo_issues = []
+        seo_good = []
+        try:
+            title = soup.find('title')
+            if title:
+                tlen = len(title.get_text().strip())
+                if tlen < 30:
+                    seo_issues.append({'issue': 'Title Too Short', 'description': f'Title is {tlen} chars. Recommended: 30-60'})
+                elif tlen > 60:
+                    seo_issues.append({'issue': 'Title Too Long', 'description': f'Title is {tlen} chars. May be truncated'})
+                else:
+                    seo_good.append(f'Title length optimal: {tlen} characters')
+            else:
+                seo_issues.append({'issue': 'Missing Title Tag', 'description': 'Page must have a title tag'})
+
+            meta_desc = soup.find('meta', attrs={'name': 'description'})
+            if meta_desc and meta_desc.get('content'):
+                dlen = len(meta_desc.get('content', ''))
+                if dlen < 120:
+                    seo_issues.append({'issue': 'Meta Description Too Short', 'description': f'{dlen} chars. Recommended: 120-160'})
+                elif dlen > 160:
+                    seo_issues.append({'issue': 'Meta Description Too Long', 'description': f'{dlen} chars. May be truncated'})
+                else:
+                    seo_good.append(f'Meta description optimal: {dlen} characters')
+            else:
+                seo_issues.append({'issue': 'Missing Meta Description', 'description': 'Helps improve click-through rates'})
+
+            h1_tags = soup.find_all('h1')
+            if len(h1_tags) == 0:
+                seo_issues.append({'issue': 'No H1 Tag', 'description': 'Page should have exactly one H1'})
+            elif len(h1_tags) > 1:
+                seo_issues.append({'issue': 'Multiple H1 Tags', 'description': f'Found {len(h1_tags)} H1 tags'})
+            else:
+                seo_good.append('Single H1 tag found')
+
+            if not soup.find('link', rel='canonical'):
+                seo_issues.append({'issue': 'Missing Canonical URL', 'description': 'Helps prevent duplicate content'})
+            else:
+                seo_good.append('Canonical URL defined')
+
+            og_tags = soup.find_all('meta', property=re.compile('^og:'))
+            if len(og_tags) >= 4:
+                seo_good.append(f'Open Graph tags present ({len(og_tags)})')
+            else:
+                seo_issues.append({'issue': 'Incomplete Open Graph Tags', 'description': 'Add og:title, og:description, og:image, og:url'})
+
+        except Exception as e:
+            seo_issues.append({'issue': 'SEO Check Failed', 'description': str(e)})
+
+        return {'issues': seo_issues, 'good': seo_good, 'score': max(0, 100 - len(seo_issues) * 10)}
+
+    def _check_accessibility_for_page(self, page_url, soup):
+        """Check accessibility using pre-fetched soup."""
+        issues = []
+        good = []
+        try:
+            html_tag = soup.find('html')
+            if html_tag and html_tag.get('lang'):
+                good.append(f'Language declared: {html_tag.get("lang")}')
+            else:
+                issues.append({'issue': 'Missing Language Declaration', 'description': 'Add lang attribute to <html> tag'})
+
+            images = soup.find_all('img')
+            no_alt = [img for img in images if not img.get('alt')]
+            if no_alt:
+                issues.append({'issue': 'Images Missing Alt Text', 'description': f'{len(no_alt)} of {len(images)} images missing alt'})
+            elif images:
+                good.append(f'All {len(images)} images have alt text')
+
+            inputs = soup.find_all(['input', 'select', 'textarea'])
+            unlabeled = []
+            for inp in inputs:
+                if inp.get('type') in ['hidden', 'submit', 'button']:
+                    continue
+                input_id = inp.get('id')
+                has_label = bool(soup.find('label', attrs={'for': input_id})) if input_id else False
+                has_aria = bool(inp.get('aria-label') or inp.get('aria-labelledby'))
+                if not (has_label or has_aria):
+                    unlabeled.append(inp)
+            if unlabeled:
+                issues.append({'issue': 'Form Inputs Without Labels', 'description': f'{len(unlabeled)} elements missing labels'})
+            elif inputs:
+                good.append('All form inputs have labels')
+
+            landmarks = soup.find_all(attrs={'role': re.compile('main|navigation|banner|contentinfo|search')})
+            if landmarks:
+                good.append(f'ARIA landmarks present ({len(landmarks)})')
+            else:
+                issues.append({'issue': 'No ARIA Landmarks', 'description': 'Add ARIA landmarks for screen readers'})
+
+            if not soup.find('a', href=re.compile('#(main|content|skip)')):
+                issues.append({'issue': 'No Skip Navigation Link', 'description': 'Add skip link for keyboard navigation'})
+            else:
+                good.append('Skip navigation link found')
+
+        except Exception as e:
+            issues.append({'issue': 'Accessibility Check Failed', 'description': str(e)})
+
+        return {'issues': issues, 'good': good, 'score': max(0, 100 - len(issues) * 12)}
+
+    def _check_mobile_for_page(self, page_url, soup):
+        """Check mobile optimisation using pre-fetched soup."""
+        issues = []
+        good = []
+        try:
+            viewport = soup.find('meta', attrs={'name': 'viewport'})
+            if viewport:
+                if 'width=device-width' in viewport.get('content', ''):
+                    good.append('Responsive viewport configured')
+                else:
+                    issues.append({'issue': 'Incomplete Viewport Configuration', 'description': 'Viewport should include width=device-width'})
+            else:
+                issues.append({'issue': 'Missing Viewport Meta Tag', 'description': 'Required for responsive mobile design'})
+
+            if soup.find('link', rel=re.compile('apple-touch-icon')):
+                good.append('Apple touch icon configured')
+            else:
+                issues.append({'issue': 'Missing Apple Touch Icon', 'description': 'Add apple-touch-icon for iOS devices'})
+
+            if soup.find('link', rel='manifest'):
+                good.append('Web app manifest present')
+            else:
+                issues.append({'issue': 'No Web App Manifest', 'description': 'Consider adding manifest.json for PWA'})
+
+            total_images = len(soup.find_all('img'))
+            img_with_srcset = soup.find_all('img', srcset=True)
+            if total_images > 0 and len(img_with_srcset) <= total_images * 0.5:
+                issues.append({'issue': 'No Responsive Images', 'description': 'Use srcset for responsive image loading'})
+            elif total_images > 0:
+                good.append('Responsive images implemented (srcset)')
+
+        except Exception as e:
+            issues.append({'issue': 'Mobile Check Failed', 'description': str(e)})
+
+        return {'issues': issues, 'good': good, 'score': max(0, 100 - len(issues) * 15)}
+
+    def _suggest_improvements_for_page(self, page_url, soup):
+        """Suggest improvements using pre-fetched soup."""
+        suggestions = []
+        try:
+            if not soup.find('meta', attrs={'name': 'description'}):
+                suggestions.append({'category': 'SEO', 'suggestion': 'Add meta description', 'priority': 'high', 'description': 'Meta descriptions help search engines understand your page'})
+            if not soup.find('title'):
+                suggestions.append({'category': 'SEO', 'suggestion': 'Add page title', 'priority': 'high', 'description': 'Every page should have a unique title'})
+            h1_tags = soup.find_all('h1')
+            if len(h1_tags) == 0:
+                suggestions.append({'category': 'SEO', 'suggestion': 'Add H1 heading', 'priority': 'medium', 'description': 'H1 tags help structure content'})
+            elif len(h1_tags) > 1:
+                suggestions.append({'category': 'SEO', 'suggestion': 'Multiple H1 tags found', 'priority': 'low', 'description': 'Best practice is one H1 per page'})
+            images = soup.find_all('img')
+            missing_alt = sum(1 for img in images if not img.get('alt'))
+            if missing_alt > 0:
+                suggestions.append({'category': 'Accessibility', 'suggestion': f'{missing_alt} images missing alt text', 'priority': 'high', 'description': 'Alt text improves accessibility and SEO'})
+            if not soup.find('link', rel='icon') and not soup.find('link', rel='shortcut icon'):
+                suggestions.append({'category': 'Branding', 'suggestion': 'Add favicon', 'priority': 'low', 'description': 'Favicons improve brand recognition'})
+            if not soup.find('meta', attrs={'name': 'viewport'}):
+                suggestions.append({'category': 'Mobile', 'suggestion': 'Add viewport meta tag', 'priority': 'high', 'description': 'Required for responsive mobile design'})
+            if not bool(soup.find(string=re.compile('google-analytics|gtag|analytics'))):
+                suggestions.append({'category': 'Analytics', 'suggestion': 'Consider adding analytics', 'priority': 'medium', 'description': 'Track visitor behaviour to improve your site'})
+            scripts = soup.find_all('script', src=True)
+            unminified = [s for s in scripts if s.get('src') and not any(m in s.get('src') for m in ['.min.', '-min.'])]
+            if unminified:
+                suggestions.append({'category': 'Performance', 'suggestion': 'Minify JavaScript files', 'priority': 'medium', 'description': 'Reduce file sizes by minifying JS and CSS'})
+        except Exception as e:
+            suggestions.append({'category': 'Error', 'suggestion': 'Analysis incomplete', 'priority': 'high', 'description': str(e)})
+        return {'suggestions': suggestions, 'total_count': len(suggestions)}
+
     def check_security(self):
         """Check security issues"""
         security_issues = []

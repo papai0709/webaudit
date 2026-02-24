@@ -27,7 +27,7 @@ header {
 header h1 {
     font-size: 3em;
     margin-bottom: 10px;
-    text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.2);
 }
 
 .subtitle {
@@ -39,7 +39,7 @@ header h1 {
     background: white;
     padding: 30px;
     border-radius: 15px;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
     margin-bottom: 30px;
 }
 
@@ -100,7 +100,7 @@ header h1 {
     background: white;
     padding: 60px;
     border-radius: 15px;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
     text-align: center;
     margin-bottom: 30px;
 }
@@ -116,8 +116,13 @@ header h1 {
 }
 
 @keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
+    0% {
+        transform: rotate(0deg);
+    }
+
+    100% {
+        transform: rotate(360deg);
+    }
 }
 
 .error-section {
@@ -148,6 +153,7 @@ header h1 {
         opacity: 0;
         transform: translateY(20px);
     }
+
     to {
         opacity: 1;
         transform: translateY(0);
@@ -159,7 +165,7 @@ header h1 {
     padding: 25px;
     border-radius: 15px;
     margin-bottom: 20px;
-    box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
 }
 
 .results-header h2 {
@@ -238,14 +244,14 @@ header h1 {
     background: white;
     border-radius: 15px;
     margin-bottom: 20px;
-    box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
     overflow: hidden;
     transition: transform 0.3s;
 }
 
 .result-card:hover {
     transform: translateY(-5px);
-    box-shadow: 0 10px 25px rgba(0,0,0,0.15);
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
 }
 
 .card-header {
@@ -292,8 +298,9 @@ header h1 {
     font-size: 1.5em;
 }
 
-.score-badge, .count-badge {
-    background: rgba(255,255,255,0.3);
+.score-badge,
+.count-badge {
+    background: rgba(255, 255, 255, 0.3);
     padding: 8px 16px;
     border-radius: 20px;
     font-weight: bold;
@@ -542,6 +549,155 @@ header h1 {
     color: #666;
 }
 
+/* ── Crawl Max Pages control ─────────────────────────────────────── */
+.crawl-control {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    background: #f4f6ff;
+    border: 2px solid #e0e0e0;
+    border-radius: 10px;
+    padding: 6px 14px;
+    min-width: 90px;
+    transition: border-color 0.3s;
+}
+
+.crawl-control:focus-within {
+    border-color: #667eea;
+}
+
+.crawl-control label {
+    font-size: 0.72em;
+    font-weight: 600;
+    color: #667eea;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    white-space: nowrap;
+}
+
+.crawl-control input[type="number"] {
+    width: 60px;
+    border: none;
+    background: transparent;
+    font-size: 1.1em;
+    font-weight: bold;
+    color: #333;
+    text-align: center;
+    outline: none;
+    -moz-appearance: textfield;
+    appearance: textfield;
+}
+
+.crawl-control input[type="number"]::-webkit-inner-spin-button,
+.crawl-control input[type="number"]::-webkit-outer-spin-button {
+    opacity: 1;
+}
+
+/* ── Crawl summary line below URL ────────────────────────────────── */
+.crawl-summary-text {
+    color: #667eea;
+    font-size: 0.95em;
+    margin-top: 2px;
+}
+
+/* ── Crawled pages card ──────────────────────────────────────────── */
+.crawled-header {
+    background: linear-gradient(135deg, #667eea 0%, #43e97b 100%);
+}
+
+.crawled-table-wrap {
+    overflow-x: auto;
+    border-radius: 8px;
+}
+
+.crawled-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9em;
+}
+
+.crawled-table thead th {
+    background: #f4f6ff;
+    padding: 10px 14px;
+    text-align: left;
+    font-weight: 600;
+    color: #555;
+    border-bottom: 2px solid #e0e0e0;
+    white-space: nowrap;
+}
+
+.crawled-table tbody tr {
+    border-bottom: 1px solid #f0f0f0;
+    transition: background 0.2s;
+}
+
+.crawled-table tbody tr:hover {
+    background: #f9f9ff;
+}
+
+.crawled-table tbody td {
+    padding: 9px 14px;
+    vertical-align: middle;
+}
+
+.crawled-table tbody td:first-child a {
+    color: #667eea;
+    text-decoration: none;
+    word-break: break-all;
+    font-size: 0.85em;
+}
+
+.crawled-table tbody td:first-child a:hover {
+    text-decoration: underline;
+}
+
+/* ── Mini score pills in table ───────────────────────────────────── */
+.mini-score {
+    display: inline-block;
+    width: 38px;
+    padding: 3px 0;
+    border-radius: 20px;
+    font-size: 0.82em;
+    font-weight: bold;
+    text-align: center;
+    color: white;
+}
+
+.mini-score.excellent {
+    background: linear-gradient(135deg, #43e97b, #38f9d7);
+}
+
+.mini-score.good {
+    background: linear-gradient(135deg, #4facfe, #00f2fe);
+}
+
+.mini-score.fair {
+    background: linear-gradient(135deg, #fa709a, #fee140);
+}
+
+.mini-score.poor {
+    background: linear-gradient(135deg, #f093fb, #f5576c);
+}
+
+/* ── Broken link "found on" attribution ──────────────────────────── */
+.broken-link-found {
+    font-size: 0.82em;
+    color: #888;
+    margin-top: 6px;
+}
+
+.broken-link-found a {
+    color: #667eea;
+    text-decoration: none;
+}
+
+.broken-link-found a:hover {
+    text-decoration: underline;
+}
+
+
 /* Results Header with Export Button */
 .results-header-top {
     display: flex;
@@ -585,19 +741,19 @@ footer {
     header h1 {
         font-size: 2em;
     }
-    
+
     .subtitle {
         font-size: 1em;
     }
-    
+
     .input-group {
         flex-direction: column;
     }
-    
+
     #analyzeBtn {
         width: 100%;
     }
-    
+
     .stats-row,
     .metrics-grid {
         grid-template-columns: 1fr;
@@ -721,10 +877,55 @@ footer {
         text-decoration: none !important;
     }
 
-    a::after {
+    /* Only print href URLs for standalone content links, not table cell links */
+    .results-header a::after,
+    .issues-list a::after,
+    .passed-list a::after,
+    .broken-link a::after {
         content: " (" attr(href) ")" !important;
         font-size: 0.8em !important;
         color: #999 !important;
+    }
+
+    /* Crawled pages table — never show hrefs inline (they're already the cell text) */
+    .crawled-table a::after {
+        content: none !important;
+    }
+
+    /* Allow the crawled-table card to break across pages for long lists */
+    #crawledPagesCard {
+        page-break-inside: auto !important;
+    }
+
+    /* Remove overflow clipping so the full table renders in print */
+    .crawled-table-wrap {
+        overflow: visible !important;
+    }
+
+    /* Ensure the table spans full width and doesn't get cut */
+    .crawled-table {
+        width: 100% !important;
+        font-size: 0.8em !important;
+        table-layout: fixed !important;
+        word-break: break-all !important;
+    }
+
+    .crawled-table thead th,
+    .crawled-table tbody td {
+        padding: 6px 8px !important;
+    }
+
+    /* Print gradient colours for mini-score badges */
+    .mini-score {
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+        padding: 2px 4px !important;
+        font-size: 0.78em !important;
+    }
+
+    /* Crawled page rows should not be clipped mid-row */
+    .crawled-table tbody tr {
+        page-break-inside: avoid !important;
     }
 
     /* Show all content, no scrolling issues */

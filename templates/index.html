@@ -21,17 +21,21 @@
                     placeholder="Enter website URL (e.g., example.com or https://example.com)"
                     aria-label="Website URL"
                 >
+                <div class="crawl-control" title="Max number of pages to crawl">
+                    <label for="maxPagesInput">Max Pages</label>
+                    <input type="number" id="maxPagesInput" value="20" min="1" max="100" aria-label="Max pages to crawl">
+                </div>
                 <button id="analyzeBtn" onclick="analyzeWebsite()">
                     <span class="btn-text">Analyze Website</span>
                     <span class="btn-loader" style="display: none;">⏳</span>
                 </button>
             </div>
-            <p class="input-hint">Enter any website URL to check for security issues, broken links, performance problems, and improvement opportunities.</p>
+            <p class="input-hint">Enters any website URL. The crawler will follow internal links up to <strong>Max Pages</strong> deep and run all checks on every page found.</p>
         </div>
 
         <div id="loadingSection" class="loading-section" style="display: none;">
             <div class="spinner"></div>
-            <p>Analyzing website... This may take a few moments.</p>
+            <p id="loadingMessage">Crawling website and running analysis… This may take a minute for larger sites.</p>
         </div>
 
         <div id="errorSection" class="error-section" style="display: none;">
@@ -48,6 +52,7 @@
                         <h2>Analysis Results</h2>
                         <p id="analyzedUrl"></p>
                         <p id="timestamp"></p>
+                        <p id="crawlSummary" class="crawl-summary-text"></p>
                     </div>
                     <button id="exportPdfBtn" class="export-btn" onclick="exportToPdf()">
                         📄 Export as PDF
@@ -62,6 +67,31 @@
                 </div>
                 <div class="card-body">
                     <div id="overallScores" class="scores-grid"></div>
+                </div>
+            </div>
+
+            <!-- Crawled Pages Card -->
+            <div class="result-card" id="crawledPagesCard" style="display:none">
+                <div class="card-header crawled-header">
+                    <h3>🗺️ Pages Crawled</h3>
+                    <span id="pagesCount" class="count-badge"></span>
+                </div>
+                <div class="card-body">
+                    <div class="crawled-table-wrap">
+                        <table id="crawledPagesTable" class="crawled-table">
+                            <thead>
+                                <tr>
+                                    <th>Page URL</th>
+                                    <th>SEO</th>
+                                    <th>Perf</th>
+                                    <th>Access.</th>
+                                    <th>Mobile</th>
+                                    <th>Broken Links</th>
+                                </tr>
+                            </thead>
+                            <tbody id="crawledPagesBody"></tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
 

@@ -15,6 +15,7 @@ def analyze():
     try:
         data = request.get_json()
         url = data.get('url', '').strip()
+        max_pages = int(data.get('max_pages', 20))
         
         if not url:
             return jsonify({'error': 'Please provide a valid URL'}), 400
@@ -24,7 +25,7 @@ def analyze():
             url = 'https://' + url
         
         # Create analyzer and run analysis
-        analyzer = WebsiteAnalyzer(url)
+        analyzer = WebsiteAnalyzer(url, max_pages=max_pages)
         results = analyzer.analyze()
         
         return jsonify(results)

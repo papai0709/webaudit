@@ -6,6 +6,7 @@ async function analyzeWebsite() {
     const resultsSection = document.getElementById('resultsSection');
 
     const url = urlInput.value.trim();
+    const maxPages = parseInt(document.getElementById('maxPagesInput').value) || 20;
 
     if (!url) {
         showError('Please enter a valid URL');
@@ -26,7 +27,7 @@ async function analyzeWebsite() {
             headers: {
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify({ url: url })
+            body: JSON.stringify({ url: url, max_pages: maxPages })
         });
 
         const data = await response.json();
@@ -93,6 +94,33 @@ function displayResults(data) {
     // Update header
     document.getElementById('analyzedUrl').innerHTML = `<strong>URL:</strong> <a href="${data.url}" target="_blank">${data.url}</a>`;
     document.getElementById('timestamp').innerHTML = `<strong>Analyzed:</strong> ${data.timestamp}`;
+
+    // Crawl summary text
+    const pageCount = data.pages_crawled || 1;
+    document.getElementById('crawlSummary').innerHTML =
+        `🗺️ <strong>${pageCount}</strong> page${pageCount !== 1 ? 's' : ''} crawled &mdash; all checks run across every page and results aggregated.`;
+
+    // Crawled pages card
+    const crawledCard = document.getElementById('crawledPagesCard');
+    const pagesCount = document.getElementById('pagesCount');
+    const crawledBody = document.getElementById('crawledPagesBody');
+    if (data.per_page_summary && data.per_page_summary.length > 0) {
+        crawledCard.style.display = 'block';
+        pagesCount.textContent = `${data.per_page_summary.length} page${data.per_page_summary.length !== 1 ? 's' : ''}`;
+        crawledBody.innerHTML = data.per_page_summary.map(p => {
+            const short = p.url.replace(/^https?:\/\/[^/]+/, '') || '/';
+            return `<tr>
+                <td><a href="${p.url}" target="_blank" title="${p.url}">${short || p.url}</a></td>
+                <td><span class="mini-score ${getScoreClass(p.seo_score)}">${p.seo_score}</span></td>
+                <td><span class="mini-score ${getScoreClass(p.perf_score)}">${p.perf_score}</span></td>
+                <td><span class="mini-score ${getScoreClass(p.acc_score)}">${p.acc_score}</span></td>
+                <td><span class="mini-score ${getScoreClass(p.mob_score)}">${p.mob_score}</span></td>
+                <td><span class="mini-score ${p.broken_count > 0 ? 'poor' : 'excellent'}">${p.broken_count}</span></td>
+            </tr>`;
+        }).join('');
+    } else {
+        crawledCard.style.display = 'none';
+    }
 
     // Display overall summary
     displayOverallSummary(data);
@@ -196,6 +224,7 @@ function displayBrokenLinks(brokenLinks) {
                         <span class="status-code">${link.status_code}</span>
                         <span class="status-reason">${link.reason}</span>
                     </div>
+                    ${link.found_on ? `<div class="broken-link-found">Found on: <a href="${link.found_on}" target="_blank">${link.found_on.replace(/^https?:\/\/[^/]+/, '') || '/'}</a></div>` : ''}
                 </div>
             `).join('');
     } else {
