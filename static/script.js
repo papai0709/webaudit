@@ -1,3 +1,5 @@
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
 async function analyzeWebsite() {
     const urlInput = document.getElementById('urlInput');
     const analyzeBtn = document.getElementById('analyzeBtn');
@@ -8,10 +10,7 @@ async function analyzeWebsite() {
     const url = urlInput.value.trim();
     const maxPages = parseInt(document.getElementById('maxPagesInput').value) || 20;
 
-    if (!url) {
-        showError('Please enter a valid URL');
-        return;
-    }
+    if (!url) { showError('Please enter a valid URL'); return; }
 
     // Reset UI
     errorSection.style.display = 'none';
@@ -22,39 +21,98 @@ async function analyzeWebsite() {
     analyzeBtn.querySelector('.btn-loader').style.display = 'inline';
 
     try {
-        const response = await fetch('/analyze', {
+        // 1. Submit job
+        const submitRes = await fetch('/analyze', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ url: url, max_pages: maxPages })
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url, max_pages: maxPages }),
         });
 
-        const data = await response.json();
+        const submitData = await submitRes.json();
+        if (!submitRes.ok) throw new Error(submitData.error || 'Failed to start analysis');
 
-        if (!response.ok) {
-            throw new Error(data.error || 'Failed to analyze website');
-        }
+        const jobId = submitData.job_id;
 
+        // 2. Poll until done
+        const data = await pollJob(jobId);
+
+        // 3. Render
         displayResults(data);
 
-    } catch (error) {
-        showError(error.message);
+    } catch (err) {
+        showError(err.message);
     } finally {
         loadingSection.style.display = 'none';
+        setLoadingProgress(0, 'queued', '');
         analyzeBtn.disabled = false;
         analyzeBtn.querySelector('.btn-text').style.display = 'inline';
         analyzeBtn.querySelector('.btn-loader').style.display = 'none';
     }
 }
 
+// ── Job polling ───────────────────────────────────────────────────────────────
+
+const STAGE_LABELS = {
+    queued: '⏳ Queued — starting shortly…',
+    crawling: '🕷️ Crawling pages…',
+    security: '🔒 Checking security headers & SSL…',
+    analysing: '🔬 Running all checks…',
+    done: '✅ Analysis complete!',
+    error: '❌ Analysis failed',
+};
+
+async function pollJob(jobId) {
+    const POLL_INTERVAL_MS = 800;
+    const MAX_WAIT_MS = 5 * 60 * 1000;   // 5 min hard cap
+    const started = Date.now();
+
+    while (Date.now() - started < MAX_WAIT_MS) {
+        await sleep(POLL_INTERVAL_MS);
+
+        const res = await fetch(`/status/${jobId}`);
+        const data = await res.json();
+
+        if (!res.ok) throw new Error(data.error || 'Status check failed');
+
+        // Update progress UI
+        setLoadingProgress(data.progress || 0, data.stage || 'running', data.detail || '');
+
+        if (data.status === 'error') throw new Error(data.error || 'Analysis failed on server');
+
+        if (data.status === 'done') {
+            // Fetch final result
+            const resultRes = await fetch(`/result/${jobId}`);
+            const resultData = await resultRes.json();
+            if (!resultRes.ok) throw new Error(resultData.error || 'Failed to retrieve result');
+            return resultData;
+        }
+    }
+    throw new Error('Analysis timed out. Try reducing the Max Pages count.');
+}
+
+function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+// ── Progress UI ───────────────────────────────────────────────────────────────
+
+function setLoadingProgress(pct, stage, detail) {
+    const bar = document.getElementById('progressBar');
+    const label = document.getElementById('progressLabel');
+    const subtext = document.getElementById('progressSubtext');
+
+    if (bar) bar.style.width = `${Math.min(100, pct)}%`;
+    if (label) label.textContent = STAGE_LABELS[stage] || 'Analysing…';
+    if (subtext) subtext.textContent = detail || '';
+}
+
+// ── Error display ─────────────────────────────────────────────────────────────
+
 function showError(message) {
     const errorSection = document.getElementById('errorSection');
-    const errorMessage = document.getElementById('errorMessage');
-
-    errorMessage.textContent = message;
+    document.getElementById('errorMessage').textContent = message;
     errorSection.style.display = 'block';
 }
+
+// ── Score helpers ─────────────────────────────────────────────────────────────
 
 function getScoreClass(score) {
     if (score >= 90) return 'excellent';
@@ -63,50 +121,42 @@ function getScoreClass(score) {
     return 'poor';
 }
 
-function displayOverallSummary(data) {
-    const overallScores = document.getElementById('overallScores');
+// ── Results rendering ─────────────────────────────────────────────────────────
 
+function displayOverallSummary(data) {
     const scores = [
         { name: 'Security', score: data.security?.score || 0, icon: '🔒' },
         { name: 'SEO', score: data.seo?.score || 0, icon: '🎯' },
         { name: 'Accessibility', score: data.accessibility?.score || 0, icon: '♿' },
         { name: 'Rendering', score: data.rendering?.score || 0, icon: '🎨' },
-        { name: 'Mobile', score: data.mobile?.score || 0, icon: '📱' }
+        { name: 'Mobile', score: data.mobile?.score || 0, icon: '📱' },
     ];
-
-    // Calculate overall average
-    const avgScore = Math.round(scores.reduce((sum, s) => sum + s.score, 0) / scores.length);
+    const avgScore = Math.round(scores.reduce((s, i) => s + i.score, 0) / scores.length);
     scores.unshift({ name: 'Overall', score: avgScore, icon: '⭐' });
 
-    overallScores.innerHTML = scores.map(item => `
+    document.getElementById('overallScores').innerHTML = scores.map(item => `
         <div class="score-item">
-            <div class="score-circle ${getScoreClass(item.score)}">
-                <span>${item.score}</span>
-            </div>
+            <div class="score-circle ${getScoreClass(item.score)}"><span>${item.score}</span></div>
             <div class="score-name">${item.icon} ${item.name}</div>
-        </div>
-    `).join('');
+        </div>`).join('');
 }
 
 function displayResults(data) {
-    const resultsSection = document.getElementById('resultsSection');
+    document.getElementById('analyzedUrl').innerHTML =
+        `<strong>URL:</strong> <a href="${data.url}" target="_blank">${data.url}</a>`;
+    document.getElementById('timestamp').innerHTML =
+        `<strong>Analysed:</strong> ${data.timestamp}`;
 
-    // Update header
-    document.getElementById('analyzedUrl').innerHTML = `<strong>URL:</strong> <a href="${data.url}" target="_blank">${data.url}</a>`;
-    document.getElementById('timestamp').innerHTML = `<strong>Analyzed:</strong> ${data.timestamp}`;
-
-    // Crawl summary text
     const pageCount = data.pages_crawled || 1;
     document.getElementById('crawlSummary').innerHTML =
-        `🗺️ <strong>${pageCount}</strong> page${pageCount !== 1 ? 's' : ''} crawled &mdash; all checks run across every page and results aggregated.`;
+        `🗺️ <strong>${pageCount}</strong> page${pageCount !== 1 ? 's' : ''} crawled — all checks run across every page and results aggregated.`;
 
-    // Crawled pages card
     const crawledCard = document.getElementById('crawledPagesCard');
-    const pagesCount = document.getElementById('pagesCount');
     const crawledBody = document.getElementById('crawledPagesBody');
-    if (data.per_page_summary && data.per_page_summary.length > 0) {
+    if (data.per_page_summary?.length > 0) {
         crawledCard.style.display = 'block';
-        pagesCount.textContent = `${data.per_page_summary.length} page${data.per_page_summary.length !== 1 ? 's' : ''}`;
+        document.getElementById('pagesCount').textContent =
+            `${data.per_page_summary.length} page${data.per_page_summary.length !== 1 ? 's' : ''}`;
         crawledBody.innerHTML = data.per_page_summary.map(p => {
             const short = p.url.replace(/^https?:\/\/[^/]+/, '') || '/';
             return `<tr>
@@ -122,269 +172,162 @@ function displayResults(data) {
         crawledCard.style.display = 'none';
     }
 
-    // Display overall summary
     displayOverallSummary(data);
-
-    // Display security results
     displaySecurity(data.security);
-
-    // Display broken links
     displayBrokenLinks(data.broken_links);
-
-    // Display performance
     displayPerformance(data.performance);
-
-    // Display rendering
     displayRendering(data.rendering);
-
-    // Display improvements
     displayImprovements(data.improvements);
-
-    // Display SEO
     displaySEO(data.seo);
-
-    // Display Accessibility
     displayAccessibility(data.accessibility);
-
-    // Display Mobile Optimization
     displayMobile(data.mobile);
 
+    const resultsSection = document.getElementById('resultsSection');
     resultsSection.style.display = 'block';
     resultsSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
+// ── Section renderers ─────────────────────────────────────────────────────────
+
 function displaySecurity(security) {
-    const securityScore = document.getElementById('securityScore');
-    const securityPassed = document.getElementById('securityPassed');
-    const securityIssues = document.getElementById('securityIssues');
+    document.getElementById('securityScore').textContent = `Score: ${security.score || 0}/100`;
 
-    // Display score
-    const score = security.score || 0;
-    securityScore.textContent = `Score: ${score}/100`;
+    const passed = document.getElementById('securityPassed');
+    passed.innerHTML = security.passed?.length > 0
+        ? '<h4 style="margin-bottom:15px;color:#4caf50;">✓ Passed Security Checks</h4>' +
+        security.passed.map(i => `<div class="passed-item">${i}</div>`).join('')
+        : '';
 
-    // Display passed checks
-    if (security.passed && security.passed.length > 0) {
-        securityPassed.innerHTML = '<h4 style="margin-bottom: 15px; color: #4caf50;">✓ Passed Security Checks</h4>' +
-            security.passed.map(item => `
-                <div class="passed-item">${item}</div>
-            `).join('');
-    } else {
-        securityPassed.innerHTML = '';
-    }
-
-    // Display issues
-    if (security.issues && security.issues.length > 0) {
-        securityIssues.innerHTML = '<h4 style="margin-bottom: 15px; color: #ff9800;">⚠ Security Issues Found</h4>' +
-            security.issues.map(issue => `
-                <div class="issue-item ${issue.severity}">
-                    <span class="issue-severity severity-${issue.severity}">${issue.severity}</span>
-                    <div class="issue-title">${issue.issue}</div>
-                    <div class="issue-description">${issue.description}</div>
-                </div>
-            `).join('');
-    } else {
-        securityIssues.innerHTML = '<div class="passed-item">No security issues found! 🎉</div>';
-    }
+    const issues = document.getElementById('securityIssues');
+    issues.innerHTML = security.issues?.length > 0
+        ? '<h4 style="margin-bottom:15px;color:#ff9800;">⚠ Security Issues Found</h4>' +
+        security.issues.map(i => `
+            <div class="issue-item ${i.severity}">
+                <span class="issue-severity severity-${i.severity}">${i.severity}</span>
+                <div class="issue-title">${i.issue}</div>
+                <div class="issue-description">${i.description}</div>
+            </div>`).join('')
+        : '<div class="passed-item">No security issues found! 🎉</div>';
 }
 
 function displayBrokenLinks(brokenLinks) {
-    const brokenLinksCount = document.getElementById('brokenLinksCount');
-    const linksStats = document.getElementById('linksStats');
-    const brokenLinksList = document.getElementById('brokenLinksList');
-
     const brokenCount = brokenLinks.broken_count || 0;
     const workingCount = brokenLinks.working_count || 0;
     const totalChecked = brokenLinks.total_checked || 0;
 
-    brokenLinksCount.textContent = `${brokenCount} broken`;
+    document.getElementById('brokenLinksCount').textContent = `${brokenCount} broken`;
 
-    // Display stats
-    linksStats.innerHTML = `
-        <div class="stat-box">
-            <span class="stat-value">${totalChecked}</span>
-            <span class="stat-label">Total Links Checked</span>
-        </div>
-        <div class="stat-box">
-            <span class="stat-value" style="color: #4caf50;">${workingCount}</span>
-            <span class="stat-label">Working Links</span>
-        </div>
-        <div class="stat-box">
-            <span class="stat-value" style="color: #f44336;">${brokenCount}</span>
-            <span class="stat-label">Broken Links</span>
-        </div>
-    `;
+    document.getElementById('linksStats').innerHTML = `
+        <div class="stat-box"><span class="stat-value">${totalChecked}</span><span class="stat-label">Total Links Checked</span></div>
+        <div class="stat-box"><span class="stat-value" style="color:#4caf50;">${workingCount}</span><span class="stat-label">Working Links</span></div>
+        <div class="stat-box"><span class="stat-value" style="color:#f44336;">${brokenCount}</span><span class="stat-label">Broken Links</span></div>`;
 
-    // Display broken links
-    if (brokenLinks.broken && brokenLinks.broken.length > 0) {
-        brokenLinksList.innerHTML = '<h4 style="margin-bottom: 15px; color: #f44336;">🔴 Broken Links</h4>' +
-            brokenLinks.broken.map(link => `
-                <div class="broken-link">
-                    <div class="broken-link-url">${link.url}</div>
-                    <div class="broken-link-status">
-                        <span class="status-code">${link.status_code}</span>
-                        <span class="status-reason">${link.reason}</span>
-                    </div>
-                    ${link.found_on ? `<div class="broken-link-found">Found on: <a href="${link.found_on}" target="_blank">${link.found_on.replace(/^https?:\/\/[^/]+/, '') || '/'}</a></div>` : ''}
+    document.getElementById('brokenLinksList').innerHTML = brokenLinks.broken?.length > 0
+        ? '<h4 style="margin-bottom:15px;color:#f44336;">🔴 Broken Links</h4>' +
+        brokenLinks.broken.map(link => `
+            <div class="broken-link">
+                <div class="broken-link-url">${link.url}</div>
+                <div class="broken-link-status">
+                    <span class="status-code">${link.status_code}</span>
+                    <span class="status-reason">${link.reason}</span>
                 </div>
-            `).join('');
-    } else {
-        brokenLinksList.innerHTML = '<div class="passed-item">No broken links found! All links are working properly. ✓</div>';
-    }
+                ${link.found_on ? `<div class="broken-link-found">Found on: <a href="${link.found_on}" target="_blank">${link.found_on.replace(/^https?:\/\/[^/]+/, '') || '/'}</a></div>` : ''}
+            </div>`).join('')
+        : '<div class="passed-item">No broken links found! All links are working properly. ✓</div>';
 }
 
 function displayPerformance(performance) {
-    const performanceMetrics = document.getElementById('performanceMetrics');
-    const performanceGood = document.getElementById('performanceGood');
-    const performanceIssues = document.getElementById('performanceIssues');
+    document.getElementById('performanceMetrics').innerHTML = `
+        <div class="metric-box"><span class="metric-value">${performance.load_time || 'N/A'}</span><span class="metric-label">Load Time</span></div>
+        <div class="metric-box"><span class="metric-value">${performance.page_size || 'N/A'}</span><span class="metric-label">Page Size</span></div>`;
 
-    // Display metrics
-    performanceMetrics.innerHTML = `
-        <div class="metric-box">
-            <span class="metric-value">${performance.load_time || 'N/A'}</span>
-            <span class="metric-label">Load Time</span>
-        </div>
-        <div class="metric-box">
-            <span class="metric-value">${performance.page_size || 'N/A'}</span>
-            <span class="metric-label">Page Size</span>
-        </div>
-    `;
+    const good = document.getElementById('performanceGood');
+    good.innerHTML = performance.good?.length > 0
+        ? '<h4 style="margin-bottom:15px;color:#4caf50;">✓ Good Performance</h4>' +
+        performance.good.map(i => `<div class="passed-item">${i}</div>`).join('')
+        : '';
 
-    // Display good performance items
-    if (performance.good && performance.good.length > 0) {
-        performanceGood.innerHTML = '<h4 style="margin-bottom: 15px; color: #4caf50;">✓ Good Performance</h4>' +
-            performance.good.map(item => `
-                <div class="passed-item">${item}</div>
-            `).join('');
-    } else {
-        performanceGood.innerHTML = '';
-    }
-
-    // Display issues
-    if (performance.issues && performance.issues.length > 0) {
-        performanceIssues.innerHTML = '<h4 style="margin-bottom: 15px; color: #ff9800;">⚠ Performance Issues</h4>' +
-            performance.issues.map(issue => `
-                <div class="issue-item">
-                    <div class="issue-title">${issue.issue}</div>
-                    <div class="issue-description">${issue.description}</div>
-                    ${issue.value !== 'N/A' ? `<div style="margin-top: 5px; color: #667eea; font-weight: bold;">Current: ${issue.value}</div>` : ''}
-                </div>
-            `).join('');
-    } else {
-        performanceIssues.innerHTML = '<div class="passed-item">No performance issues found! Site is well optimized. 🚀</div>';
-    }
+    document.getElementById('performanceIssues').innerHTML = performance.issues?.length > 0
+        ? '<h4 style="margin-bottom:15px;color:#ff9800;">⚠ Performance Issues</h4>' +
+        performance.issues.map(i => `
+            <div class="issue-item">
+                <div class="issue-title">${i.issue}</div>
+                <div class="issue-description">${i.description}</div>
+                ${i.value !== 'N/A' ? `<div style="margin-top:5px;color:#667eea;font-weight:bold;">Current: ${i.value}</div>` : ''}
+            </div>`).join('')
+        : '<div class="passed-item">No performance issues found! Site is well optimized. 🚀</div>';
 }
 
 function displayImprovements(improvements) {
-    const improvementsCount = document.getElementById('improvementsCount');
-    const improvementsList = document.getElementById('improvementsList');
+    document.getElementById('improvementsCount').textContent =
+        `${improvements.total_count || 0} suggestions`;
 
-    const count = improvements.total_count || 0;
-    improvementsCount.textContent = `${count} suggestions`;
-
-    if (improvements.suggestions && improvements.suggestions.length > 0) {
-        improvementsList.innerHTML = improvements.suggestions.map(item => `
+    document.getElementById('improvementsList').innerHTML = improvements.suggestions?.length > 0
+        ? improvements.suggestions.map(i => `
             <div class="improvement-item">
                 <div class="improvement-header">
-                    <span class="improvement-category">${item.category}</span>
-                    <span class="improvement-priority priority-${item.priority}">${item.priority} priority</span>
+                    <span class="improvement-category">${i.category}</span>
+                    <span class="improvement-priority priority-${i.priority}">${i.priority} priority</span>
                 </div>
-                <div class="improvement-title">${item.suggestion}</div>
-                <div class="improvement-description">${item.description}</div>
-            </div>
-        `).join('');
-    } else {
-        improvementsList.innerHTML = '<div class="passed-item">No improvements needed! Your website is in great shape. 🌟</div>';
-    }
+                <div class="improvement-title">${i.suggestion}</div>
+                <div class="improvement-description">${i.description}</div>
+            </div>`).join('')
+        : '<div class="passed-item">No improvements needed! Your website is in great shape. 🌟</div>';
 }
 
 function displaySEO(seo) {
-    const seoScore = document.getElementById('seoScore');
-    const seoGood = document.getElementById('seoGood');
-    const seoIssues = document.getElementById('seoIssues');
+    document.getElementById('seoScore').textContent = `Score: ${seo.score || 0}/100`;
 
-    const score = seo.score || 0;
-    seoScore.textContent = `Score: ${score}/100`;
+    document.getElementById('seoGood').innerHTML = seo.good?.length > 0
+        ? '<h4 style="margin-bottom:15px;color:#4caf50;">✓ SEO Strengths</h4>' +
+        seo.good.map(i => `<div class="passed-item">${i}</div>`).join('')
+        : '';
 
-    if (seo.good && seo.good.length > 0) {
-        seoGood.innerHTML = '<h4 style="margin-bottom: 15px; color: #4caf50;">✓ SEO Strengths</h4>' +
-            seo.good.map(item => `
-                <div class="passed-item">${item}</div>
-            `).join('');
-    } else {
-        seoGood.innerHTML = '';
-    }
-
-    if (seo.issues && seo.issues.length > 0) {
-        seoIssues.innerHTML = '<h4 style="margin-bottom: 15px; color: #ff9800;">⚠ SEO Issues</h4>' +
-            seo.issues.map(issue => `
-                <div class="issue-item">
-                    <div class="issue-title">${issue.issue}</div>
-                    <div class="issue-description">${issue.description}</div>
-                </div>
-            `).join('');
-    } else {
-        seoIssues.innerHTML = '<div class="passed-item">Excellent SEO! No issues found. 🎯</div>';
-    }
+    document.getElementById('seoIssues').innerHTML = seo.issues?.length > 0
+        ? '<h4 style="margin-bottom:15px;color:#ff9800;">⚠ SEO Issues</h4>' +
+        seo.issues.map(i => `
+            <div class="issue-item">
+                <div class="issue-title">${i.issue}</div>
+                <div class="issue-description">${i.description}</div>
+            </div>`).join('')
+        : '<div class="passed-item">Excellent SEO! No issues found. 🎯</div>';
 }
 
 function displayAccessibility(accessibility) {
-    const accessibilityScore = document.getElementById('accessibilityScore');
-    const accessibilityGood = document.getElementById('accessibilityGood');
-    const accessibilityIssues = document.getElementById('accessibilityIssues');
+    document.getElementById('accessibilityScore').textContent =
+        `Score: ${accessibility.score || 0}/100`;
 
-    const score = accessibility.score || 0;
-    accessibilityScore.textContent = `Score: ${score}/100`;
+    document.getElementById('accessibilityGood').innerHTML = accessibility.good?.length > 0
+        ? '<h4 style="margin-bottom:15px;color:#4caf50;">✓ Accessibility Features</h4>' +
+        accessibility.good.map(i => `<div class="passed-item">${i}</div>`).join('')
+        : '';
 
-    if (accessibility.good && accessibility.good.length > 0) {
-        accessibilityGood.innerHTML = '<h4 style="margin-bottom: 15px; color: #4caf50;">✓ Accessibility Features</h4>' +
-            accessibility.good.map(item => `
-                <div class="passed-item">${item}</div>
-            `).join('');
-    } else {
-        accessibilityGood.innerHTML = '';
-    }
-
-    if (accessibility.issues && accessibility.issues.length > 0) {
-        accessibilityIssues.innerHTML = '<h4 style="margin-bottom: 15px; color: #ff9800;">⚠ Accessibility Issues</h4>' +
-            accessibility.issues.map(issue => `
-                <div class="issue-item">
-                    <div class="issue-title">${issue.issue}</div>
-                    <div class="issue-description">${issue.description}</div>
-                </div>
-            `).join('');
-    } else {
-        accessibilityIssues.innerHTML = '<div class="passed-item">Fully accessible! Great job. ♿</div>';
-    }
+    document.getElementById('accessibilityIssues').innerHTML = accessibility.issues?.length > 0
+        ? '<h4 style="margin-bottom:15px;color:#ff9800;">⚠ Accessibility Issues</h4>' +
+        accessibility.issues.map(i => `
+            <div class="issue-item">
+                <div class="issue-title">${i.issue}</div>
+                <div class="issue-description">${i.description}</div>
+            </div>`).join('')
+        : '<div class="passed-item">Fully accessible! Great job. ♿</div>';
 }
 
 function displayMobile(mobile) {
-    const mobileScore = document.getElementById('mobileScore');
-    const mobileGood = document.getElementById('mobileGood');
-    const mobileIssues = document.getElementById('mobileIssues');
+    document.getElementById('mobileScore').textContent = `Score: ${mobile.score || 0}/100`;
 
-    const score = mobile.score || 0;
-    mobileScore.textContent = `Score: ${score}/100`;
+    document.getElementById('mobileGood').innerHTML = mobile.good?.length > 0
+        ? '<h4 style="margin-bottom:15px;color:#4caf50;">✓ Mobile-Friendly Features</h4>' +
+        mobile.good.map(i => `<div class="passed-item">${i}</div>`).join('')
+        : '';
 
-    if (mobile.good && mobile.good.length > 0) {
-        mobileGood.innerHTML = '<h4 style="margin-bottom: 15px; color: #4caf50;">✓ Mobile-Friendly Features</h4>' +
-            mobile.good.map(item => `
-                <div class="passed-item">${item}</div>
-            `).join('');
-    } else {
-        mobileGood.innerHTML = '';
-    }
-
-    if (mobile.issues && mobile.issues.length > 0) {
-        mobileIssues.innerHTML = '<h4 style="margin-bottom: 15px; color: #ff9800;">⚠ Mobile Optimization Issues</h4>' +
-            mobile.issues.map(issue => `
-                <div class="issue-item">
-                    <div class="issue-title">${issue.issue}</div>
-                    <div class="issue-description">${issue.description}</div>
-                </div>
-            `).join('');
-    } else {
-        mobileIssues.innerHTML = '<div class="passed-item">Perfectly optimized for mobile! 📱</div>';
-    }
+    document.getElementById('mobileIssues').innerHTML = mobile.issues?.length > 0
+        ? '<h4 style="margin-bottom:15px;color:#ff9800;">⚠ Mobile Optimization Issues</h4>' +
+        mobile.issues.map(i => `
+            <div class="issue-item">
+                <div class="issue-title">${i.issue}</div>
+                <div class="issue-description">${i.description}</div>
+            </div>`).join('')
+        : '<div class="passed-item">Perfectly optimized for mobile! 📱</div>';
 }
 
 function displayRendering(rendering) {
@@ -399,62 +342,41 @@ function displayRendering(rendering) {
         return;
     }
 
-    const score = rendering.score || 0;
-    renderingScore.textContent = `Score: ${score}/100`;
+    renderingScore.textContent = `Score: ${rendering.score || 0}/100`;
 
-    if (rendering.good && rendering.good.length > 0) {
-        renderingGood.innerHTML = '<h4 style="margin-bottom: 15px; color: #4caf50;">✓ Rendering Checks Passed</h4>' +
-            rendering.good.map(item => `
-                <div class="passed-item">${item}</div>
-            `).join('');
-    } else {
-        renderingGood.innerHTML = '';
-    }
+    renderingGood.innerHTML = rendering.good?.length > 0
+        ? '<h4 style="margin-bottom:15px;color:#4caf50;">✓ Rendering Checks Passed</h4>' +
+        rendering.good.map(i => `<div class="passed-item">${i}</div>`).join('')
+        : '';
 
-    if (rendering.issues && rendering.issues.length > 0) {
-        renderingIssues.innerHTML = '<h4 style="margin-bottom: 15px; color: #ff9800;">⚠ Rendering Issues</h4>' +
-            rendering.issues.map(issue => `
-                <div class="issue-item ${issue.severity || ''}">
-                    ${issue.severity ? `<span class="issue-severity severity-${issue.severity}">${issue.severity}</span>` : ''}
-                    <div class="issue-title">${issue.issue}</div>
-                    <div class="issue-description">${issue.description}</div>
-                </div>
-            `).join('');
-    } else {
-        renderingIssues.innerHTML = '<div class="passed-item">No rendering issues found! Page renders correctly. 🎨</div>';
-    }
+    renderingIssues.innerHTML = rendering.issues?.length > 0
+        ? '<h4 style="margin-bottom:15px;color:#ff9800;">⚠ Rendering Issues</h4>' +
+        rendering.issues.map(i => `
+            <div class="issue-item ${i.severity || ''}">
+                ${i.severity ? `<span class="issue-severity severity-${i.severity}">${i.severity}</span>` : ''}
+                <div class="issue-title">${i.issue}</div>
+                <div class="issue-description">${i.description}</div>
+            </div>`).join('')
+        : '<div class="passed-item">No rendering issues found! Page renders correctly. 🎨</div>';
 }
+
+// ── PDF export ────────────────────────────────────────────────────────────────
 
 function exportToPdf() {
-    // Add print-specific class to body
     document.body.classList.add('printing');
-
-    // Get the analyzed URL for the filename
-    const urlElement = document.getElementById('analyzedUrl');
-    const analyzedUrl = urlElement ? urlElement.textContent.replace('URL: ', '').trim() : 'website';
-    const sanitizedUrl = analyzedUrl.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 50);
-
-    // Store original title
-    const originalTitle = document.title;
-
-    // Set document title for PDF filename
-    document.title = `Web_Analysis_Report_${sanitizedUrl}`;
-
-    // Trigger print dialog
+    const urlEl = document.getElementById('analyzedUrl');
+    const sanitized = (urlEl ? urlEl.textContent.replace('URL: ', '').trim() : 'website')
+        .replace(/[^a-zA-Z0-9]/g, '_').substring(0, 50);
+    const orig = document.title;
+    document.title = `Web_Analysis_Report_${sanitized}`;
     window.print();
-
-    // Restore original title after print dialog
-    setTimeout(() => {
-        document.title = originalTitle;
-        document.body.classList.remove('printing');
-    }, 1000);
+    setTimeout(() => { document.title = orig; document.body.classList.remove('printing'); }, 1000);
 }
 
-// Allow Enter key to trigger analysis
-document.addEventListener('DOMContentLoaded', function () {
-    document.getElementById('urlInput').addEventListener('keypress', function (event) {
-        if (event.key === 'Enter') {
-            analyzeWebsite();
-        }
+// ── Enter key binding ─────────────────────────────────────────────────────────
+
+document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('urlInput').addEventListener('keypress', e => {
+        if (e.key === 'Enter') analyzeWebsite();
     });
 });
