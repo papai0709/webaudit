@@ -14,12 +14,13 @@ async function analyzeWebsite() {
     }
 
     // Reset UI
-    errorSection.style.display = 'none';
-    resultsSection.style.display = 'none';
-    loadingSection.style.display = 'block';
+    errorSection.classList.add('hidden');
+    resultsSection.classList.add('hidden');
+    loadingSection.classList.remove('hidden');
+    
     analyzeBtn.disabled = true;
-    analyzeBtn.querySelector('.btn-text').style.display = 'none';
-    analyzeBtn.querySelector('.btn-loader').style.display = 'inline';
+    analyzeBtn.querySelector('.btn-text').classList.add('hidden');
+    analyzeBtn.querySelector('.btn-loader').classList.remove('hidden');
 
     try {
         const response = await fetch('/analyze', {
@@ -41,10 +42,10 @@ async function analyzeWebsite() {
     } catch (error) {
         showError(error.message);
     } finally {
-        loadingSection.style.display = 'none';
+        loadingSection.classList.add('hidden');
         analyzeBtn.disabled = false;
-        analyzeBtn.querySelector('.btn-text').style.display = 'inline';
-        analyzeBtn.querySelector('.btn-loader').style.display = 'none';
+        analyzeBtn.querySelector('.btn-text').classList.remove('hidden');
+        analyzeBtn.querySelector('.btn-loader').classList.add('hidden');
     }
 }
 
@@ -53,408 +54,166 @@ function showError(message) {
     const errorMessage = document.getElementById('errorMessage');
 
     errorMessage.textContent = message;
-    errorSection.style.display = 'block';
+    errorSection.classList.remove('hidden');
+    errorSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
-function getScoreClass(score) {
-    if (score >= 90) return 'excellent';
-    if (score >= 70) return 'good';
-    if (score >= 50) return 'fair';
-    return 'poor';
+function getScoreBadge(score) {
+    if (score >= 90) return 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30';
+    if (score >= 70) return 'bg-blue-500/20 text-blue-400 border border-blue-500/30';
+    if (score >= 50) return 'bg-orange-500/20 text-orange-400 border border-orange-500/30';
+    return 'bg-rose-500/20 text-rose-400 border border-rose-500/30';
 }
 
-function displayOverallSummary(data) {
-    const overallScores = document.getElementById('overallScores');
-
-    const scores = [
-        { name: 'Security', score: data.security?.score || 0, icon: '🔒' },
-        { name: 'SEO', score: data.seo?.score || 0, icon: '🎯' },
-        { name: 'Accessibility', score: data.accessibility?.score || 0, icon: '♿' },
-        { name: 'Rendering', score: data.rendering?.score || 0, icon: '🎨' },
-        { name: 'Mobile', score: data.mobile?.score || 0, icon: '📱' }
-    ];
-
-    // Calculate overall average
-    const avgScore = Math.round(scores.reduce((sum, s) => sum + s.score, 0) / scores.length);
-    scores.unshift({ name: 'Overall', score: avgScore, icon: '⭐' });
-
-    overallScores.innerHTML = scores.map(item => `
-        <div class="score-item">
-            <div class="score-circle ${getScoreClass(item.score)}">
-                <span>${item.score}</span>
+function createProgressRing(name, score, colorClass, dropShadow) {
+    const radius = 50;
+    const circumference = 2 * Math.PI * radius; // Approx 314
+    const offset = circumference - (score / 100) * circumference;
+    
+    return `
+        <div class="flex flex-col items-center gap-4">
+            <div class="relative w-28 h-28 flex items-center justify-center">
+                <svg class="w-full h-full transform -rotate-90">
+                    <circle class="text-white/5" cx="56" cy="56" fill="transparent" r="${radius}" stroke="currentColor" stroke-width="4"></circle>
+                    <circle class="${colorClass} ${dropShadow} progress-ring-circle" cx="56" cy="56" fill="transparent" r="${radius}" stroke="currentColor" stroke-dasharray="${circumference}" stroke-dashoffset="${offset}" stroke-linecap="round" stroke-width="4"></circle>
+                </svg>
+                <span class="absolute text-2xl font-black text-white text-shadow-sm">${score}</span>
             </div>
-            <div class="score-name">${item.icon} ${item.name}</div>
+            <span class="text-[10px] uppercase tracking-[0.2em] ${colorClass} font-black text-center">${name}</span>
         </div>
-    `).join('');
+    `;
 }
 
 function displayResults(data) {
     const resultsSection = document.getElementById('resultsSection');
 
-    // Update header
-    document.getElementById('analyzedUrl').innerHTML = `<strong>URL:</strong> <a href="${data.url}" target="_blank">${data.url}</a>`;
-    document.getElementById('timestamp').innerHTML = `<strong>Analyzed:</strong> ${data.timestamp}`;
-
-    // Crawl summary text
+    // Header Meta
+    document.getElementById('analyzedUrlContainer').textContent = data.url;
+    document.getElementById('timestamp').textContent = `Last active: ${data.timestamp}`;
     const pageCount = data.pages_crawled || 1;
-    document.getElementById('crawlSummary').innerHTML =
-        `🗺️ <strong>${pageCount}</strong> page${pageCount !== 1 ? 's' : ''} crawled &mdash; all checks run across every page and results aggregated.`;
+    document.getElementById('crawlSummary').textContent = `${pageCount} Page Audited`;
 
-    // Crawled pages card
+    // Overview Rings
+    const overallScores = document.getElementById('overallScores');
+    const sections = [
+        { name: 'Security', score: data.security?.score || 0, color: 'text-blue-400', shadow: 'drop-shadow-[0_0_8px_rgba(96,165,250,0.6)]' },
+        { name: 'SEO', score: data.seo?.score || 0, color: 'text-purple-400', shadow: 'drop-shadow-[0_0_8px_rgba(168,85,247,0.6)]' },
+        { name: 'Perf', score: data.performance?.score || 0, color: 'text-cyan-400', shadow: 'drop-shadow-[0_0_8px_rgba(34,211,238,0.6)]' },
+        { name: 'Access', score: data.accessibility?.score || 0, color: 'text-orange-400', shadow: 'drop-shadow-[0_0_8px_rgba(251,146,60,0.6)]' },
+        { name: 'Mobile', score: data.mobile?.score || 0, color: 'text-emerald-400', shadow: 'drop-shadow-[0_0_8px_rgba(52,211,153,0.6)]' }
+    ];
+    overallScores.innerHTML = sections.map(s => createProgressRing(s.name, s.score, s.color, s.shadow)).join('');
+
+    // Quick Stats
+    document.getElementById('totalLinksChecked').textContent = (data.broken_links?.total_checked || 0).toLocaleString();
+    document.getElementById('brokenLinksCount').textContent = (data.broken_links?.broken_count || 0).toLocaleString();
+
+    // Table
     const crawledCard = document.getElementById('crawledPagesCard');
     const pagesCount = document.getElementById('pagesCount');
     const crawledBody = document.getElementById('crawledPagesBody');
     if (data.per_page_summary && data.per_page_summary.length > 0) {
-        crawledCard.style.display = 'block';
-        pagesCount.textContent = `${data.per_page_summary.length} page${data.per_page_summary.length !== 1 ? 's' : ''}`;
+        crawledCard.classList.remove('hidden');
+        pagesCount.textContent = `(${data.per_page_summary.length}/${data.per_page_summary.length} Analyzed)`;
         crawledBody.innerHTML = data.per_page_summary.map(p => {
             const short = p.url.replace(/^https?:\/\/[^/]+/, '') || '/';
-            return `<tr>
-                <td><a href="${p.url}" target="_blank" title="${p.url}">${short || p.url}</a></td>
-                <td><span class="mini-score ${getScoreClass(p.seo_score)}">${p.seo_score}</span></td>
-                <td><span class="mini-score ${getScoreClass(p.perf_score)}">${p.perf_score}</span></td>
-                <td><span class="mini-score ${getScoreClass(p.acc_score)}">${p.acc_score}</span></td>
-                <td><span class="mini-score ${getScoreClass(p.mob_score)}">${p.mob_score}</span></td>
-                <td><span class="mini-score ${p.broken_count > 0 ? 'poor' : 'excellent'}">${p.broken_count}</span></td>
+            return `<tr class="hover:bg-white/[0.04] transition-colors group">
+                <td class="px-8 py-5 font-mono text-blue-300 font-semibold truncate max-w-[200px]"><a href="${p.url}" target="_blank" title="${p.url}">${short}</a></td>
+                <td class="px-8 py-5"><span class="${getScoreBadge(p.seo_score)} px-3 py-1 rounded-lg text-xs font-black">${p.seo_score}</span></td>
+                <td class="px-8 py-5"><span class="${getScoreBadge(p.perf_score)} px-3 py-1 rounded-lg text-xs font-black">${p.perf_score}</span></td>
+                <td class="px-8 py-5"><span class="${getScoreBadge(p.acc_score)} px-3 py-1 rounded-lg text-xs font-black">${p.acc_score}</span></td>
+                <td class="px-8 py-5"><span class="${getScoreBadge(p.mob_score)} px-3 py-1 rounded-lg text-xs font-black">${p.mob_score}</span></td>
+                <td class="px-8 py-5 font-bold ${p.broken_count > 0 ? 'text-rose-400' : 'text-on-surface-variant'}">${p.broken_count} Broken</td>
             </tr>`;
         }).join('');
     } else {
-        crawledCard.style.display = 'none';
+        crawledCard.classList.add('hidden');
     }
 
-    // Display overall summary
-    displayOverallSummary(data);
-
-    // Display security results
-    displaySecurity(data.security);
-
-    // Display broken links
-    displayBrokenLinks(data.broken_links);
-
-    // Display performance
-    displayPerformance(data.performance);
-
-    // Display rendering
-    displayRendering(data.rendering);
-
-    // Display improvements
-    displayImprovements(data.improvements);
-
-    // Display SEO
-    displaySEO(data.seo);
-
-    // Display Accessibility
-    displayAccessibility(data.accessibility);
-
-    // Display Mobile Optimization
-    displayMobile(data.mobile);
-
-    resultsSection.style.display = 'block';
-    resultsSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-}
-
-function displaySecurity(security) {
-    const securityScore = document.getElementById('securityScore');
-    const securityPassed = document.getElementById('securityPassed');
-    const securityIssues = document.getElementById('securityIssues');
-
-    // Display score
-    const score = security.score || 0;
-    securityScore.textContent = `Score: ${score}/100`;
-
-    // Display passed checks
-    if (security.passed && security.passed.length > 0) {
-        securityPassed.innerHTML = '<h4 style="margin-bottom: 15px; color: #4caf50;">✓ Passed Security Checks</h4>' +
-            security.passed.map(item => `
-                <div class="passed-item">${item}</div>
-            `).join('');
-    } else {
-        securityPassed.innerHTML = '';
-    }
-
-    // Display issues
-    if (security.issues && security.issues.length > 0) {
-        securityIssues.innerHTML = '<h4 style="margin-bottom: 15px; color: #ff9800;">⚠ Security Issues Found</h4>' +
-            security.issues.map(issue => `
-                <div class="issue-item ${issue.severity}">
-                    <span class="issue-severity severity-${issue.severity}">${issue.severity}</span>
-                    <div class="issue-title">${issue.issue}</div>
-                    <div class="issue-description">${issue.description}</div>
-                </div>
-            `).join('');
-    } else {
-        securityIssues.innerHTML = '<div class="passed-item">No security issues found! 🎉</div>';
-    }
-}
-
-function displayBrokenLinks(brokenLinks) {
-    const brokenLinksCount = document.getElementById('brokenLinksCount');
-    const linksStats = document.getElementById('linksStats');
-    const brokenLinksList = document.getElementById('brokenLinksList');
-
-    const brokenCount = brokenLinks.broken_count || 0;
-    const workingCount = brokenLinks.working_count || 0;
-    const totalChecked = brokenLinks.total_checked || 0;
-
-    brokenLinksCount.textContent = `${brokenCount} broken`;
-
-    // Display stats
-    linksStats.innerHTML = `
-        <div class="stat-box">
-            <span class="stat-value">${totalChecked}</span>
-            <span class="stat-label">Total Links Checked</span>
-        </div>
-        <div class="stat-box">
-            <span class="stat-value" style="color: #4caf50;">${workingCount}</span>
-            <span class="stat-label">Working Links</span>
-        </div>
-        <div class="stat-box">
-            <span class="stat-value" style="color: #f44336;">${brokenCount}</span>
-            <span class="stat-label">Broken Links</span>
-        </div>
-    `;
-
-    // Display broken links
-    if (brokenLinks.broken && brokenLinks.broken.length > 0) {
-        brokenLinksList.innerHTML = '<h4 style="margin-bottom: 15px; color: #f44336;">🔴 Broken Links</h4>' +
-            brokenLinks.broken.map(link => `
-                <div class="broken-link">
-                    <div class="broken-link-url">${link.url}</div>
-                    <div class="broken-link-status">
-                        <span class="status-code">${link.status_code}</span>
-                        <span class="status-reason">${link.reason}</span>
-                    </div>
-                    ${link.found_on ? `<div class="broken-link-found">Found on: <a href="${link.found_on}" target="_blank">${link.found_on.replace(/^https?:\/\/[^/]+/, '') || '/'}</a></div>` : ''}
-                </div>
-            `).join('');
-    } else {
-        brokenLinksList.innerHTML = '<div class="passed-item">No broken links found! All links are working properly. ✓</div>';
-    }
-}
-
-function displayPerformance(performance) {
-    const performanceMetrics = document.getElementById('performanceMetrics');
-    const performanceGood = document.getElementById('performanceGood');
-    const performanceIssues = document.getElementById('performanceIssues');
-
-    // Display metrics
-    performanceMetrics.innerHTML = `
-        <div class="metric-box">
-            <span class="metric-value">${performance.load_time || 'N/A'}</span>
-            <span class="metric-label">Load Time</span>
-        </div>
-        <div class="metric-box">
-            <span class="metric-value">${performance.page_size || 'N/A'}</span>
-            <span class="metric-label">Page Size</span>
-        </div>
-    `;
-
-    // Display good performance items
-    if (performance.good && performance.good.length > 0) {
-        performanceGood.innerHTML = '<h4 style="margin-bottom: 15px; color: #4caf50;">✓ Good Performance</h4>' +
-            performance.good.map(item => `
-                <div class="passed-item">${item}</div>
-            `).join('');
-    } else {
-        performanceGood.innerHTML = '';
-    }
-
-    // Display issues
-    if (performance.issues && performance.issues.length > 0) {
-        performanceIssues.innerHTML = '<h4 style="margin-bottom: 15px; color: #ff9800;">⚠ Performance Issues</h4>' +
-            performance.issues.map(issue => `
-                <div class="issue-item">
-                    <div class="issue-title">${issue.issue}</div>
-                    <div class="issue-description">${issue.description}</div>
-                    ${issue.value !== 'N/A' ? `<div style="margin-top: 5px; color: #667eea; font-weight: bold;">Current: ${issue.value}</div>` : ''}
-                </div>
-            `).join('');
-    } else {
-        performanceIssues.innerHTML = '<div class="passed-item">No performance issues found! Site is well optimized. 🚀</div>';
-    }
-}
-
-function displayImprovements(improvements) {
-    const improvementsCount = document.getElementById('improvementsCount');
+    // Detail Sections
+    displaySection('security', data.security, 'text-blue-400', 'bg-blue-500/20 text-blue-300 border border-blue-500/30');
+    displayPerformanceSection(data.performance);
+    displaySection('seo', data.seo, 'text-emerald-400', 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30');
+    displaySection('accessibility', data.accessibility, 'text-orange-400', 'bg-orange-500/20 text-orange-300 border border-orange-500/30');
+    displaySection('mobile', data.mobile, 'text-emerald-400', 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30');
+    
+    // Improvements
     const improvementsList = document.getElementById('improvementsList');
-
-    const count = improvements.total_count || 0;
-    improvementsCount.textContent = `${count} suggestions`;
-
-    if (improvements.suggestions && improvements.suggestions.length > 0) {
-        improvementsList.innerHTML = improvements.suggestions.map(item => `
-            <div class="improvement-item">
-                <div class="improvement-header">
-                    <span class="improvement-category">${item.category}</span>
-                    <span class="improvement-priority priority-${item.priority}">${item.priority} priority</span>
+    if (data.improvements?.suggestions) {
+        improvementsList.innerHTML = data.improvements.suggestions.map(s => `
+            <div class="p-6 bg-white/[0.03] rounded-2xl border border-white/5 hover:border-white/10 transition-colors">
+                <div class="flex justify-between items-start mb-4">
+                    <span class="px-3 py-1 bg-white/5 rounded-full text-[9px] uppercase font-black tracking-widest text-on-surface-variant">${s.category}</span>
+                    <span class="text-[9px] font-black tracking-widest uppercase ${s.priority === 'high' ? 'text-rose-400' : 'text-purple-400'}">${s.priority} PRO</span>
                 </div>
-                <div class="improvement-title">${item.suggestion}</div>
-                <div class="improvement-description">${item.description}</div>
+                <h5 class="font-black text-white mb-2 leading-tight">${s.suggestion}</h5>
+                <p class="text-xs text-on-surface-variant leading-relaxed opacity-70">${s.description}</p>
             </div>
         `).join('');
-    } else {
-        improvementsList.innerHTML = '<div class="passed-item">No improvements needed! Your website is in great shape. 🌟</div>';
     }
+
+    resultsSection.classList.remove('hidden');
+    resultsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-function displaySEO(seo) {
-    const seoScore = document.getElementById('seoScore');
-    const seoGood = document.getElementById('seoGood');
-    const seoIssues = document.getElementById('seoIssues');
+function displaySection(id, sectionData, iconColor, badgeClass) {
+    const scoreEl = document.getElementById(`${id}Score`);
+    const badgeEl = document.getElementById(`${id}Badge`);
+    const resultsEl = document.getElementById(`${id}Results`);
 
-    const score = seo.score || 0;
-    seoScore.textContent = `Score: ${score}/100`;
+    if (!sectionData) return;
 
-    if (seo.good && seo.good.length > 0) {
-        seoGood.innerHTML = '<h4 style="margin-bottom: 15px; color: #4caf50;">✓ SEO Strengths</h4>' +
-            seo.good.map(item => `
-                <div class="passed-item">${item}</div>
-            `).join('');
-    } else {
-        seoGood.innerHTML = '';
+    if (scoreEl) scoreEl.textContent = `Score: ${sectionData.score}/100`;
+    if (badgeEl) {
+        badgeEl.className = `${badgeClass} px-4 py-1 rounded-full text-[10px] font-black tracking-widest`;
+        badgeEl.textContent = sectionData.score >= 90 ? 'OPTIMIZED' : (sectionData.score >= 50 ? 'STABLE' : 'CRITICAL');
     }
 
-    if (seo.issues && seo.issues.length > 0) {
-        seoIssues.innerHTML = '<h4 style="margin-bottom: 15px; color: #ff9800;">⚠ SEO Issues</h4>' +
-            seo.issues.map(issue => `
-                <div class="issue-item">
-                    <div class="issue-title">${issue.issue}</div>
-                    <div class="issue-description">${issue.description}</div>
+    let html = '';
+    if (sectionData.passed) {
+        html += sectionData.passed.map(item => `
+            <div class="flex items-center gap-3 text-xs text-on-surface font-medium">
+                <span class="material-symbols-outlined text-emerald-400 text-xl" style="font-variation-settings: 'FILL' 1">verified</span>
+                ${item}
+            </div>
+        `).join('');
+    }
+    if (sectionData.issues) {
+        html += sectionData.issues.map(issue => `
+            <div class="flex items-start gap-3 p-3 bg-white/[0.03] rounded-xl border border-white/5">
+                <span class="material-symbols-outlined text-rose-500 text-xl" style="font-variation-settings: 'FILL' 1">report</span>
+                <div>
+                    <div class="font-bold text-white text-xs">${issue.issue || issue}</div>
+                    ${issue.description ? `<div class="text-[10px] text-on-surface-variant opacity-70 mt-1">${issue.description}</div>` : ''}
                 </div>
-            `).join('');
-    } else {
-        seoIssues.innerHTML = '<div class="passed-item">Excellent SEO! No issues found. 🎯</div>';
+            </div>
+        `).join('');
     }
+    resultsEl.innerHTML = html;
 }
 
-function displayAccessibility(accessibility) {
-    const accessibilityScore = document.getElementById('accessibilityScore');
-    const accessibilityGood = document.getElementById('accessibilityGood');
-    const accessibilityIssues = document.getElementById('accessibilityIssues');
-
-    const score = accessibility.score || 0;
-    accessibilityScore.textContent = `Score: ${score}/100`;
-
-    if (accessibility.good && accessibility.good.length > 0) {
-        accessibilityGood.innerHTML = '<h4 style="margin-bottom: 15px; color: #4caf50;">✓ Accessibility Features</h4>' +
-            accessibility.good.map(item => `
-                <div class="passed-item">${item}</div>
-            `).join('');
-    } else {
-        accessibilityGood.innerHTML = '';
+function displayPerformanceSection(perf) {
+    const metricsEl = document.getElementById('performanceMetrics');
+    if (metricsEl) {
+        metricsEl.innerHTML = `
+            <div class="flex-1 p-4 bg-white/[0.03] rounded-xl border border-white/5 text-center">
+                <div class="text-xl font-black text-white">${perf.load_time || 'N/A'}</div>
+                <div class="text-[9px] text-on-surface-variant font-black uppercase tracking-widest mt-1">Velocity</div>
+            </div>
+            <div class="flex-1 p-4 bg-white/[0.03] rounded-xl border border-white/5 text-center">
+                <div class="text-xl font-black text-white">${perf.page_size || 'N/A'}</div>
+                <div class="text-[9px] text-on-surface-variant font-black uppercase tracking-widest mt-1">Weight</div>
+            </div>
+        `;
     }
-
-    if (accessibility.issues && accessibility.issues.length > 0) {
-        accessibilityIssues.innerHTML = '<h4 style="margin-bottom: 15px; color: #ff9800;">⚠ Accessibility Issues</h4>' +
-            accessibility.issues.map(issue => `
-                <div class="issue-item">
-                    <div class="issue-title">${issue.issue}</div>
-                    <div class="issue-description">${issue.description}</div>
-                </div>
-            `).join('');
-    } else {
-        accessibilityIssues.innerHTML = '<div class="passed-item">Fully accessible! Great job. ♿</div>';
-    }
+    displaySection('performance', perf, 'text-purple-400', 'bg-purple-500/20 text-purple-300 border border-purple-500/30');
 }
 
-function displayMobile(mobile) {
-    const mobileScore = document.getElementById('mobileScore');
-    const mobileGood = document.getElementById('mobileGood');
-    const mobileIssues = document.getElementById('mobileIssues');
+function exportToPdf() { window.print(); }
 
-    const score = mobile.score || 0;
-    mobileScore.textContent = `Score: ${score}/100`;
-
-    if (mobile.good && mobile.good.length > 0) {
-        mobileGood.innerHTML = '<h4 style="margin-bottom: 15px; color: #4caf50;">✓ Mobile-Friendly Features</h4>' +
-            mobile.good.map(item => `
-                <div class="passed-item">${item}</div>
-            `).join('');
-    } else {
-        mobileGood.innerHTML = '';
+document.addEventListener('DOMContentLoaded', () => {
+    const urlInput = document.getElementById('urlInput');
+    if (urlInput) {
+        urlInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') analyzeWebsite(); });
     }
-
-    if (mobile.issues && mobile.issues.length > 0) {
-        mobileIssues.innerHTML = '<h4 style="margin-bottom: 15px; color: #ff9800;">⚠ Mobile Optimization Issues</h4>' +
-            mobile.issues.map(issue => `
-                <div class="issue-item">
-                    <div class="issue-title">${issue.issue}</div>
-                    <div class="issue-description">${issue.description}</div>
-                </div>
-            `).join('');
-    } else {
-        mobileIssues.innerHTML = '<div class="passed-item">Perfectly optimized for mobile! 📱</div>';
-    }
-}
-
-function displayRendering(rendering) {
-    const renderingScore = document.getElementById('renderingScore');
-    const renderingGood = document.getElementById('renderingGood');
-    const renderingIssues = document.getElementById('renderingIssues');
-
-    if (!rendering) {
-        renderingScore.textContent = 'N/A';
-        renderingGood.innerHTML = '';
-        renderingIssues.innerHTML = '<div class="issue-item">Rendering analysis not available</div>';
-        return;
-    }
-
-    const score = rendering.score || 0;
-    renderingScore.textContent = `Score: ${score}/100`;
-
-    if (rendering.good && rendering.good.length > 0) {
-        renderingGood.innerHTML = '<h4 style="margin-bottom: 15px; color: #4caf50;">✓ Rendering Checks Passed</h4>' +
-            rendering.good.map(item => `
-                <div class="passed-item">${item}</div>
-            `).join('');
-    } else {
-        renderingGood.innerHTML = '';
-    }
-
-    if (rendering.issues && rendering.issues.length > 0) {
-        renderingIssues.innerHTML = '<h4 style="margin-bottom: 15px; color: #ff9800;">⚠ Rendering Issues</h4>' +
-            rendering.issues.map(issue => `
-                <div class="issue-item ${issue.severity || ''}">
-                    ${issue.severity ? `<span class="issue-severity severity-${issue.severity}">${issue.severity}</span>` : ''}
-                    <div class="issue-title">${issue.issue}</div>
-                    <div class="issue-description">${issue.description}</div>
-                </div>
-            `).join('');
-    } else {
-        renderingIssues.innerHTML = '<div class="passed-item">No rendering issues found! Page renders correctly. 🎨</div>';
-    }
-}
-
-function exportToPdf() {
-    // Add print-specific class to body
-    document.body.classList.add('printing');
-
-    // Get the analyzed URL for the filename
-    const urlElement = document.getElementById('analyzedUrl');
-    const analyzedUrl = urlElement ? urlElement.textContent.replace('URL: ', '').trim() : 'website';
-    const sanitizedUrl = analyzedUrl.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 50);
-
-    // Store original title
-    const originalTitle = document.title;
-
-    // Set document title for PDF filename
-    document.title = `Web_Analysis_Report_${sanitizedUrl}`;
-
-    // Trigger print dialog
-    window.print();
-
-    // Restore original title after print dialog
-    setTimeout(() => {
-        document.title = originalTitle;
-        document.body.classList.remove('printing');
-    }, 1000);
-}
-
-// Allow Enter key to trigger analysis
-document.addEventListener('DOMContentLoaded', function () {
-    document.getElementById('urlInput').addEventListener('keypress', function (event) {
-        if (event.key === 'Enter') {
-            analyzeWebsite();
-        }
-    });
 });
